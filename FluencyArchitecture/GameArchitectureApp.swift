@@ -1,4 +1,5 @@
-/**
+/*
+ /**
  * Fluency App Game Architecture
  *
  * A SwiftUI application for word and category-based verbal fluency games. The app supports
@@ -14,7 +15,6 @@ import Firebase
 import FirebaseFirestore
 import SwiftData
 import Combine
-
 
 class AppDelegate: NSObject, UIApplicationDelegate {
     func application(_ application: UIApplication,
@@ -75,10 +75,11 @@ struct RootView: View {
                         }
                         .navigationTitle("Home")
                 } //: Navigation Stack
-                .onAppear {
+                .task {
 //                    clearLocalData()
-                    Task { await refreshData() }
+                    await viewModel.refreshGameData(context: modelContext)
                 }
+                
             } else {
                 LoadingView()
             }
@@ -135,6 +136,7 @@ extension RootView {
         case .gameType(let gameType): LevelListView(gameType: gameType, navPath: $vm.navPath)
         case .level(let level): GameListView(level: level, navPath: $vm.navPath)
         case .game(let game): GamePlayView(game: game)
+                
         default:
             Text("Error")
         }
@@ -176,3 +178,4 @@ final class RootViewModel: RootViewModeling {
         _ = navPath.popLast()
     }
 }
+*/

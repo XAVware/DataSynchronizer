@@ -1,13 +1,8 @@
-//
-//  Game_ViewModels.swift
-//  GameArchitecture
-//
-//  Created by Ryan Smetana on 1/7/25.
-//
-
+/*
 import SwiftUI
 import SwiftData
 import FirebaseFirestore
+
 /**
  * ViewModel that manages the game data state and refreshing:
  * - Maintains the list of available game types
@@ -25,60 +20,44 @@ final class GameViewModel: GameViewModeling {
     
     func refreshGameData(context: ModelContext) async {
         do {
+            print("Starting refreshGameData...")
             try await syncService.syncIfNeeded(context: context)
+            
+            print("Fetching local game types...")
             let descriptor = FetchDescriptor<LocalGameType>()
             let localGames = try context.fetch(descriptor)
-            gameTypes = localGames.compactMap(localToGameType)
+            print("Found \(localGames.count) local game types")
+            
+            if localGames.isEmpty {
+                print("Performing full sync...")
+                try await syncService.performFullSync(context: context)
+                let updatedLocalGames = try context.fetch(descriptor)
+                print("After full sync: Found \(updatedLocalGames.count) local game types")
+                gameTypes = updatedLocalGames.compactMap(localToGameType)
+            } else {
+                gameTypes = localGames.compactMap(localToGameType)
+            }
         } catch {
             print("Error refreshing game data: \(error)")
         }
     }
     
     private func localToGameType(_ local: LocalGameType) -> GameType {
+        print("Converting local game type: \(local.name)")
         let gameType = GameType()
         gameType.id = local.id
         gameType.name = local.name
         gameType.description = local.locDescription
-        gameType.createdAt = Timestamp(date: local.createdAt)
-        gameType.updatedAt = Timestamp(date: local.updatedAt)
         
         gameType.levels = local.levels.map { localLevel -> Level in
             let level = Level()
             level.id = localLevel.id
             level.name = localLevel.name
             level.description = localLevel.locDescription
-            level.difficulty = localLevel.difficulty
-            level.createdAt = Timestamp(date: localLevel.createdAt)
-            level.updatedAt = Timestamp(date: localLevel.updatedAt)
+            level.sugTimeLimit = localLevel.sugTimeLimit
             
-            level.games = localLevel.games.compactMap { localGame -> Game in
-                let baseGame: Game
-                switch localGame.type {
-                case "word":
-                    let wordGame = WordGame()
-                    wordGame.letterPosition = WordGame.LetterPosition(rawValue: localGame.letterPositionString ?? "start") ?? .start
-                    wordGame.targetLetter = localGame.targetLetter ?? ""
-                    baseGame = wordGame
-                case "category":
-                    let categoryGame = CategoryGame()
-                    categoryGame.answerBank = localGame.storedAnswerBank
-                    baseGame = categoryGame
-                default:
-                    let game = Game()
-                    game.type = .word
-                    baseGame = game
-                }
-                
-                baseGame.id = localGame.id
-                baseGame.name = localGame.name
-                baseGame.description = localGame.locDescription
-                baseGame.instructions = localGame.instructions
-                baseGame.timeLimit = localGame.timeLimit
-                baseGame.caseSensitive = localGame.caseSensitive
-                baseGame.createdAt = Timestamp(date: localGame.createdAt)
-                baseGame.updatedAt = Timestamp(date: localGame.updatedAt)
-                
-                return baseGame
+            level.games = localLevel.games.map { localGame -> Game in
+                return convertLocalGameToGame(localGame)
             }
             
             return level
@@ -86,13 +65,47 @@ final class GameViewModel: GameViewModeling {
         
         return gameType
     }
+    
+    private func convertLocalGameToGame(_ localGame: LocalGame) -> Game {
+        let game: Game
+        // Check actual type from stored data
+        if localGame.type == "category" {
+            let categoryGame = CategoryGame()
+            categoryGame.answerBank = localGame.answerBank ?? []
+            game = categoryGame
+        } else {
+            let wordGame = WordGame()
+            wordGame.letterPosition = WordGame.LetterPosition(rawValue: localGame.letterPosition ?? "start") ?? .start
+            wordGame.targetLetter = localGame.targetLetter ?? ""
+            game = wordGame
+        }
+        
+        print("Creating Game: \(game.gameTypeId)-\(game.levelId)- \(game.name)")
+        
+        game.id = localGame.id
+        game.name = localGame.name
+        game.description = localGame.locDescription
+        game.instructions = localGame.instructions
+        game.timeLimit = localGame.timeLimit
+        game.gameTypeId = localGame.gameTypeId
+        game.levelId = localGame.levelId
+        game.type = localGame.type == "category" ? .category : .word
+        
+        return game
+    }
 }
+
+import SwiftUI
+import FirebaseFirestore
+
 @MainActor
-final class GamePlayViewModel: GamePlayViewModeling {
+final class GamePlayViewModel: ObservableObject {
     @Published var userInput = ""
     @Published var timeRemaining: Int
     @Published var isGameActive = false
     @Published var currentAnswers: [String] = []
+    @Published var isLoadingAnswers = false
+    @Published var loadError: String?
     
     private let game: Game
     private var timer: Timer?
@@ -102,8 +115,22 @@ final class GamePlayViewModel: GamePlayViewModeling {
         self.timeRemaining = game.timeLimit
     }
     
+    func loadAnswers() async {
+        guard let categoryGame = game as? CategoryGame else { return }
+        
+        isLoadingAnswers = true
+        do {
+            let answerBank = try await GameDataService.shared.fetchCategoryAnswers(gameId: game.id ?? "")
+            categoryGame.answerBank = answerBank
+        } catch {
+            loadError = error.localizedDescription
+        }
+        isLoadingAnswers = false
+    }
+    
     func startGame() {
         isGameActive = true
+        timeRemaining = game.timeLimit
         currentAnswers = []
         startTimer()
     }
@@ -111,19 +138,33 @@ final class GamePlayViewModel: GamePlayViewModeling {
     func endGame() {
         isGameActive = false
         timer?.invalidate()
+        timer = nil
     }
     
     func submitAnswer() {
         guard !userInput.isEmpty else { return }
         
         let answer = userInput.trimmingCharacters(in: .whitespacesAndNewlines)
-        if validateAnswer(answer) {
+        if validateAnswer(answer) && !currentAnswers.contains(answer) {
             currentAnswers.append(answer)
+        } else {
         }
         userInput = ""
     }
     
-    func validateAnswer(_ answer: String) -> Bool {
+    func handleKeyPress(_ key: String) {
+        guard isGameActive else { return }
+        
+        if key == "DELETE" {
+            if !userInput.isEmpty {
+                userInput.removeLast()
+            }
+        } else {
+            userInput += key
+        }
+    }
+    
+    private func validateAnswer(_ answer: String) -> Bool {
         if let wordGame = game as? WordGame {
             return validateWordGameAnswer(answer, wordGame: wordGame)
         } else if let categoryGame = game as? CategoryGame {
@@ -133,8 +174,8 @@ final class GamePlayViewModel: GamePlayViewModeling {
     }
     
     private func validateWordGameAnswer(_ answer: String, wordGame: WordGame) -> Bool {
-        let processedAnswer = wordGame.caseSensitive ? answer : answer.lowercased()
-        let processedTarget = wordGame.caseSensitive ? wordGame.targetLetter : wordGame.targetLetter.lowercased()
+        let processedAnswer = answer.lowercased()
+        let processedTarget = wordGame.targetLetter.lowercased()
         
         return switch wordGame.letterPosition {
         case .start:    processedAnswer.hasPrefix(processedTarget)
@@ -144,10 +185,8 @@ final class GamePlayViewModel: GamePlayViewModeling {
     }
     
     private func validateCategoryGameAnswer(_ answer: String, categoryGame: CategoryGame) -> Bool {
-        let processedAnswer = categoryGame.caseSensitive ? answer : answer.lowercased()
-        let processedBank = categoryGame.answerBank.map {
-            categoryGame.caseSensitive ? $0 : $0.lowercased()
-        }
+        let processedAnswer = answer.lowercased()
+        let processedBank = categoryGame.answerBank.map { $0.lowercased() }
         return processedBank.contains(processedAnswer)
     }
     
@@ -158,13 +197,14 @@ final class GamePlayViewModel: GamePlayViewModeling {
                 
                 if self.timeRemaining > 0 && self.isGameActive {
                     self.timeRemaining -= 1
-                } else {
-                    timer.invalidate()
                     if self.timeRemaining == 0 {
                         self.endGame()
                     }
+                } else {
+                    timer.invalidate()
                 }
             }
         }
     }
 }
+*/

@@ -344,9 +344,9 @@ enum AppAuthError: Error {
 enum ViewPath: Identifiable, Hashable {
     var id: ViewPath { return self }
     case landing, login, signUp, homepage, menuView, profileView
-    case gameType(GameType)
-    case level(Level)
-    case game(Game)
+    case gameMode(LocalGameMode)
+    case level(LocalLevel)
+    case game(LocalGame)
 }
 
 // MARK: - User Model

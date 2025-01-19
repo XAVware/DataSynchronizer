@@ -1,244 +1,161 @@
-
+/*
 import SwiftUI
 import FirebaseFirestore
 import SwiftData
 
-// MARK: - Game Data Service
-/**
- * Manages Firestore fetch operations for the app.
- * Handles fetching and caching of game data.
- */
 @MainActor
 final class GameDataService: GameDataServiceProtocol {
     static let shared = GameDataService()
     private let db = Firestore.firestore()
     
-    /**
-     * Fetches all game types and their associated levels and games.
-     * Data is fetched hierarchically:
-     * GameTypes -> Levels -> Games
-     */
     func fetchGameTypes() async throws -> [GameType] {
         let snapshot = try await db.collection("gameTypes").getDocuments()
         var gameTypes: [GameType] = []
         
         for document in snapshot.documents {
-            do {
-                let gameType = try document.data(as: GameType.self)
-                gameType.id = document.documentID
-                gameType.levels = try await fetchLevels(for: document.documentID)
-                gameTypes.append(gameType)
-            } catch {
-                throw FirestoreError.decodingError("Failed to decode game type: \(error.localizedDescription)")
-            }
+            let gameType = try document.data(as: GameType.self)
+            gameType.id = document.documentID
+            gameType.levels = try await fetchLevels(for: document.documentID)
+            gameTypes.append(gameType)
         }
         
         return gameTypes
     }
     
-    func fetchUpdatedGames(since timestamp: Timestamp) async throws -> [GameType] {
-        let snapshot = try await db.collection("gameTypes")
-            .whereField("updatedAt", isGreaterThan: timestamp)
-            .getDocuments()
-        
-        var updatedGames: [GameType] = []
-        
-        for document in snapshot.documents {
-            let gameType = try document.data(as: GameType.self)
-            gameType.id = document.documentID
-            gameType.levels = try await fetchUpdatedLevels(for: document.documentID, since: timestamp)
-            updatedGames.append(gameType)
-        }
-        
-        return updatedGames
-    }
-    
-    func fetchUpdatedLevels(for gameTypeId: String, since timestamp: Timestamp) async throws -> [Level] {
-        let snapshot = try await db.collection("gameTypes")
-            .document(gameTypeId)
-            .collection("levels")
-            .whereField("updatedAt", isGreaterThan: timestamp)
-            .getDocuments()
-        
-        var levels: [Level] = []
-        for document in snapshot.documents {
-            let level = try document.data(as: Level.self)
-            level.id = document.documentID
-            level.games = try await fetchUpdatedGames(for: gameTypeId,
-                                                      levelId: document.documentID,
-                                                      since: timestamp)
-            levels.append(level)
-        }
-        return levels
-    }
-    
-    private func fetchUpdatedGames(for gameTypeId: String,
-                                   levelId: String,
-                                   since timestamp: Timestamp) async throws -> [Game] {
-        let snapshot = try await db.collection("gameTypes")
-            .document(gameTypeId)
-            .collection("levels")
-            .document(levelId)
-            .collection("games")
-            .whereField("updatedAt", isGreaterThan: timestamp)
-            .getDocuments()
-        
-        return try snapshot.documents.compactMap { document in
-            let gameType = try document.data(as: Game.self).type
-            var game: Game?
-            
-            switch gameType {
-            case .word:
-                let wordGame = try document.data(as: WordGame.self)
-                wordGame.id = document.documentID
-                game = wordGame
-            case .category:
-                let categoryGame = try document.data(as: CategoryGame.self)
-                categoryGame.id = document.documentID
-                game = categoryGame
-            }
-            
-            return game
-        }
-    }
-    
-    /**
-     * Fetches all levels for a specific game type.
-     * Each level includes its collection of games.
-     */
     func fetchLevels(for gameTypeId: String) async throws -> [Level] {
-        guard !gameTypeId.isEmpty else { return [] }
-        
+        print("Fetching levels for gameType: \(gameTypeId)")
         let snapshot = try await db.collection("gameTypes")
             .document(gameTypeId)
             .collection("levels")
             .getDocuments()
         
+        print("Found \(snapshot.documents.count) levels")
         var levels: [Level] = []
         for document in snapshot.documents {
             let level = try document.data(as: Level.self)
             level.id = document.documentID
-            level.games = try await fetchGames(for: document.documentID, gameTypeId: gameTypeId)
+            print("Level \(level.name) has \(level.gameRefs.count) game refs")
+            level.games = try await fetchGames(from: level.gameRefs)
+            print("Fetched \(level.games.count) games for level \(level.name)")
             levels.append(level)
         }
         return levels
-        
-    
     }
     
-    /**
-     * Fetches games for a specific level.
-     * Handles both WordGame and CategoryGame types through polymorphic decoding.
-     */
-    func fetchGames(for levelId: String, gameTypeId: String) async throws -> [Game] {
-        let snapshot = try await db.collection("gameTypes")
-            .document(gameTypeId)
-            .collection("levels")
-            .document(levelId)
-            .collection("games")
+    func fetchGames(from refs: [DocumentReference]) async throws -> [Game] {
+        var games: [Game] = []
+        
+        for ref in refs {
+            let doc = try await ref.getDocument()
+            if let data = doc.data() {
+                let gameType = data["type"] as? String
+                
+                let game: Game
+                switch gameType {
+                case "word":
+                    let wordGame = WordGame()
+                    wordGame.letterPosition = WordGame.LetterPosition(rawValue: data["letterPosition"] as? String ?? "start") ?? .start
+                    wordGame.targetLetter = data["targetLetter"] as? String ?? ""
+                    game = wordGame
+                    
+                case "category":
+                    let categoryGame = CategoryGame()
+                    categoryGame.answerBank = data["answerBank"] as? [String] ?? []
+                    game = categoryGame
+                    
+                default:
+                    game = Game()
+                }
+                
+                game.id = doc.documentID
+                game.name = data["name"] as? String ?? ""
+                game.description = data["description"] as? String ?? ""
+                game.instructions = data["instructions"] as? String ?? ""
+                game.timeLimit = data["timeLimit"] as? Int ?? 60
+                game.gameTypeId = data["gameTypeId"] as? String ?? ""
+                game.levelId = data["levelId"] as? String ?? ""
+                
+                games.append(game)
+            }
+        }
+        
+        return games
+    }
+    
+    func fetchUpdatedGames(since date: Date) async throws -> [Game] {
+        let snapshot = try await db.collection("games")
+            .whereField("updatedAt", isGreaterThan: date)
             .getDocuments()
         
-        return try snapshot.documents.compactMap { document in
-            let gameType = try document.data(as: Game.self).type
-            var game: Game?
-            
-            switch gameType {
-            case .word:
-                let wordGame = try document.data(as: WordGame.self)
-                wordGame.id = document.documentID
-                game = wordGame
-            case .category:
-                let categoryGame = try document.data(as: CategoryGame.self)
-                categoryGame.id = document.documentID
-                game = categoryGame
-            }
-            
+        return snapshot.documents.compactMap { document in
+            let game = try? document.data(as: Game.self)
+            game?.id = document.documentID
             return game
         }
     }
     
-    func fetchGameTypeMetadata() async throws -> [GameTypeMetadata] {
-        let snapshot = try await db.collection("gameTypes").getDocuments()
-        var metadata: [GameTypeMetadata] = []
-        
-        for document in snapshot.documents {
-            let metadataSnapshot = try await document.reference
-                .collection("metadata")
-                .document("info")
-                .getDocument()
-            
-            if var data = try? metadataSnapshot.data(as: GameTypeMetadata.self) {
-                data.id = document.documentID  // Set the parent gameType ID
-                metadata.append(data)
-            }
-        }
-        
-        return metadata
-    }
-    
-    func fetchLevelMetadata(for gameTypeId: String) async throws -> [LevelMetadata] {
-        var metadata: [LevelMetadata] = []
-        let snapshot = try await db.collection("gameTypes")
-            .document(gameTypeId)
-            .collection("levels")
-            .getDocuments()
-        
-        for document in snapshot.documents {
-            let metadataSnapshot = try await document.reference
-                .collection("metadata")
-                .document("info")
-                .getDocument()
-            
-            if let data = try? metadataSnapshot.data(as: LevelMetadata.self) {
-                metadata.append(data)
-            }
-        }
-        
-        return metadata
-    }
-    
-    func fetchGameType(id: String) async throws -> GameType? {
-        let document = try await db.collection("gameTypes").document(id).getDocument()
-        
-        guard document.exists, let data = document.data() else {
-            print("DEBUG: No data found for game type \(id)")
-            return nil
-        }
-        
-        let gameType = GameType()
-        gameType.id = document.documentID
-        gameType.name = data["name"] as? String ?? ""
-        gameType.description = data["description"] as? String ?? ""
-        gameType.createdAt = data["createdAt"] as? Timestamp ?? Timestamp()
-        gameType.updatedAt = data["updatedAt"] as? Timestamp ?? Timestamp()
-        gameType.levels = try await fetchLevels(for: document.documentID)
-        
-        return gameType
-    }
-    
-    func fetchAnswerBank(for gameId: String, levelId: String, gameTypeId: String) async throws -> [String]? {
-        let document = try await db.collection("gameTypes")
-            .document(gameTypeId)
-            .collection("levels")
-            .document(levelId)
-            .collection("games")
+    func fetchCategoryAnswers(gameId: String) async throws -> [String] {
+        let snapshot = try await db.collection("games")
             .document(gameId)
             .getDocument()
         
-        if let categoryGame = try? document.data(as: CategoryGame.self) {
-            return categoryGame.answerBank
+        guard let data = snapshot.data(),
+              let answerBank = data["answerBank"] as? [String] else {
+            throw NSError(domain: "GameDataService", code: -1,
+                          userInfo: [NSLocalizedDescriptionKey: "Invalid answer bank data"])
         }
-        return nil
+        
+        return answerBank
     }
 }
 
-
+extension GameDataService {
+    func createGameFromDocument(_ document: QueryDocumentSnapshot) throws -> Game {
+        let data = document.data()
+        let gameType = data["type"] as? String
+        
+        let game: Game
+        switch gameType {
+        case "word":
+            let wordGame = WordGame()
+            if let positionStr = data["letterPosition"] as? String,
+               let position = WordGame.LetterPosition(rawValue: positionStr) {
+                wordGame.letterPosition = position
+            }
+            wordGame.targetLetter = data["targetLetter"] as? String ?? ""
+            game = wordGame
+            
+        case "category":
+            let categoryGame = CategoryGame()
+            categoryGame.answerBank = data["answerBank"] as? [String] ?? []
+            game = categoryGame
+            
+        default:
+            game = Game()
+        }
+        
+        game.id = document.documentID
+        game.name = data["name"] as? String ?? ""
+        game.description = data["description"] as? String ?? ""
+        game.instructions = data["instructions"] as? String ?? ""
+        game.timeLimit = data["timeLimit"] as? Int ?? 60
+        game.caseSensitive = data["caseSensitive"] as? Bool ?? false
+        game.gameTypeId = data["gameTypeId"] as? String ?? ""
+        game.levelId = data["levelId"] as? String ?? ""
+        game.createdAt = data["createdAt"] as? Timestamp
+        game.updatedAt = data["updatedAt"] as? Timestamp
+        
+        return game
+    }
+}
 
 final class LocalStorageManager: LocalStorageProtocol {
     func saveGameTypes(_ gameTypes: [GameType], context: ModelContext) throws {
         for gameType in gameTypes {
+            print("Saving gameType: \(gameType.name) with \(gameType.levels.count) levels")
             let localGameType = LocalGameType(from: gameType)
             localGameType.levels = gameType.levels.map { level in
+                print("Converting level: \(level.name) with \(level.games.count) games")
                 let localLevel = LocalLevel(from: level)
                 localLevel.gameType = localGameType
                 
@@ -255,16 +172,19 @@ final class LocalStorageManager: LocalStorageProtocol {
         try context.save()
     }
     
-    func fetchLocalGameTypes(context: ModelContext) throws -> [LocalGameType] {
-        let descriptor = FetchDescriptor<LocalGameType>()
-        return try context.fetch(descriptor)
-    }
-    
-    func clearLocalGameTypes(context: ModelContext) throws {
-        let descriptor = FetchDescriptor<LocalGameType>()
-        let existingGames = try context.fetch(descriptor)
-        existingGames.forEach { context.delete($0) }
-        try context.save()
+    func saveGame(_ game: Game, context: ModelContext) throws {
+        let descriptor = FetchDescriptor<LocalLevel>(
+            predicate: #Predicate<LocalLevel> { $0.id == game.levelId }
+        )
+        
+        guard let level = try context.fetch(descriptor).first else { return }
+        
+        if let existingGame = level.games.first(where: { $0.id == game.id }) {
+            updateLocalGame(existingGame, with: game)
+        } else {
+            let localGame = createLocalGame(from: game, level: level)
+            level.games.append(localGame)
+        }
     }
     
     private func createLocalGameType(from gameType: GameType) -> LocalGameType {
@@ -284,6 +204,42 @@ final class LocalStorageManager: LocalStorageProtocol {
         return localGameType
     }
     
+    private func createLocalGame(from game: Game, level: LocalLevel) -> LocalGame {
+        let localGame = LocalGame()
+        updateLocalGame(localGame, with: game)
+        localGame.level = level
+        return localGame
+    }
+    
+    private func updateLocalGame(_ localGame: LocalGame, with game: Game) {
+        localGame.id = game.id ?? UUID().uuidString
+        localGame.name = game.name
+        localGame.locDescription = game.description
+        localGame.instructions = game.instructions
+        localGame.timeLimit = game.timeLimit
+        localGame.type = game.type.rawValue
+        localGame.gameTypeId = game.gameTypeId
+        localGame.levelId = game.levelId
+        localGame.updatedAt = game.updatedAt?.dateValue() ?? Date()
+        localGame.createdAt = game.createdAt?.dateValue() ?? Date()
+        
+        if let wordGame = game as? WordGame {
+            localGame.letterPosition = wordGame.letterPosition.rawValue
+            localGame.targetLetter = wordGame.targetLetter
+            localGame.answerBank = nil
+        } else if let categoryGame = game as? CategoryGame {
+            localGame.letterPosition = nil
+            localGame.targetLetter = nil
+            localGame.answerBank = categoryGame.answerBank
+        }
+    }
+    
+    func clearLocalGameTypes(context: ModelContext) throws {
+        let descriptor = FetchDescriptor<LocalGameType>()
+        let existingGames = try context.fetch(descriptor)
+        existingGames.forEach { context.delete($0) }
+        try context.save()
+    }
 }
 
 @MainActor
@@ -294,216 +250,56 @@ final class GameSyncService: GameSyncServiceProtocol {
     private let defaults = UserDefaults.standard
     
     private enum DefaultsKeys {
-        static let lastSyncDate = "lastSyncDate"
-        static let gameTypeChecksums = "gameTypeChecksums"
-        static let levelChecksums = "levelChecksums"
+        static let lastSyncDate = "mostRecentSync"
     }
     
-    init(localStorage: LocalStorageProtocol = LocalStorageManager()) {
+    init() {
         self.gameDataService = GameDataService.shared
-        self.localStorage = localStorage
+        self.localStorage = LocalStorageManager()
     }
     
     func syncIfNeeded(context: ModelContext) async throws {
-        let localGames = try localStorage.fetchLocalGameTypes(context: context)
+        let lastSync = defaults.object(forKey: DefaultsKeys.lastSyncDate) as? Date
         
-        if localGames.isEmpty {
-            log("No local games found - performing full sync")
+        if lastSync == nil {
+            // First time sync - download everything
             try await performFullSync(context: context)
-            return
-        }
-        
-        // Check if we have stored checksums
-        let storedChecksums = defaults.dictionary(forKey: DefaultsKeys.gameTypeChecksums) as? [String: String]
-        if storedChecksums == nil {
-            log("No stored checksums found - performing full sync")
-            try await performFullSync(context: context)
-            return
-        }
-        
-        // Get metadata for all game types
-        let gameTypeMetadata = try await gameDataService.fetchGameTypeMetadata()
-        
-        var needsSync = false
-        for metadata in gameTypeMetadata {
-            if storedChecksums![metadata.id ?? ""] != metadata.checksum {
-                log("Checksum mismatch detected for game type \(metadata.id ?? "")")
-                needsSync = true
-                break
-            }
-        }
-        
-        if needsSync {
-            log("Changes detected - performing incremental sync")
-            try await performIncrementalSync(context: context)
         } else {
-            log("No changes detected - skipping sync")
+            // Incremental sync based on updatedAt timestamp
+            try await checkForUpdates(since: lastSync!, context: context)
         }
+        
+        // Update sync timestamp
+        defaults.set(Date(), forKey: DefaultsKeys.lastSyncDate)
     }
     
-    private func performFullSync(context: ModelContext) async throws {
-        try localStorage.clearLocalGameTypes(context: context)
+    func performFullSync(context: ModelContext) async throws {
+        // Download all game types with their levels
         let gameTypes = try await gameDataService.fetchGameTypes()
+        
+        // Save to SwiftData
         try localStorage.saveGameTypes(gameTypes, context: context)
-        
-        var checksums: [String: String] = [:]
-        for gameType in gameTypes {
-            if let id = gameType.id {
-                checksums[id] = GameTypeMetadata.calculateChecksum(for: gameType)
-            }
-        }
-        
-        defaults.set(checksums, forKey: DefaultsKeys.gameTypeChecksums)
-        defaults.set(Date(), forKey: DefaultsKeys.lastSyncDate)
     }
     
-    private func updateLocalGameType(_ gameType: GameType, context: ModelContext) async throws {
-        let descriptor = FetchDescriptor<LocalGameType>(
-            predicate: #Predicate<LocalGameType> { localType in
-                localType.id == (gameType.id ?? "")
-            }
-        )
+    func checkForUpdates(since date: Date, context: ModelContext) async throws {
+        let updatedGames = try await gameDataService.fetchUpdatedGames(since: date)
+        print("Updated game results (\(updatedGames.count)): \(updatedGames)")
         
-        let existingGame = try context.fetch(descriptor).first
-        
-        if let existing = existingGame {
-            existing.name = gameType.name
-            existing.locDescription = gameType.description
-            try await updateLocalLevels(gameType.levels, for: existing)
-        } else {
-            let localGame = LocalGameType(from: gameType)
-            context.insert(localGame)
-        }
-        
-        try context.save()
-    }
-    
-    private func updateLocalLevels(_ levels: [Level], for localGameType: LocalGameType) async throws {
-        let levelMetadata = try await gameDataService.fetchLevelMetadata(for: localGameType.id)
-        let storedLevelChecksums = defaults.dictionary(forKey: DefaultsKeys.levelChecksums) as? [String: String] ?? [:]
-        
-        for level in levels {
-            if let id = level.id,
-               let levelMeta = levelMetadata.first(where: { $0.id == id }),
-               storedLevelChecksums[id] != levelMeta.checksum {
-                if let existingLevel = localGameType.levels.first(where: { $0.id == id }) {
-                    existingLevel.name = level.name
-                    existingLevel.locDescription = level.description
-                    existingLevel.difficulty = level.difficulty
-                    updateLocalGames(level.games, for: existingLevel)
-                } else {
-                    let newLevel = LocalLevel(from: level)
-                    newLevel.gameType = localGameType
-                    newLevel.games = level.games.map { game in
-                        let localGame = LocalGame(from: game)
-                        localGame.level = newLevel
-                        return localGame
-                    }
-                    localGameType.levels.append(newLevel)
-                }
-            }
-        }
-        
-        var newLevelChecksums = storedLevelChecksums
-        for metadata in levelMetadata {
-            if let id = metadata.id {
-                newLevelChecksums[id] = metadata.checksum
-            }
-        }
-        defaults.set(newLevelChecksums, forKey: DefaultsKeys.levelChecksums)
-    }
-    
-    private func updateLocalGames(_ games: [Game], for level: LocalLevel) {
-        for game in games {
-            if let id = game.id, let existingGame = level.games.first(where: { $0.id == id }) {
-                existingGame.name = game.name
-                existingGame.locDescription = game.description
-                existingGame.instructions = game.instructions
-                existingGame.timeLimit = game.timeLimit
-                existingGame.caseSensitive = game.caseSensitive
-                
-                if let wordGame = game as? WordGame {
-                    existingGame.letterPositionString = wordGame.letterPosition.rawValue
-                    existingGame.targetLetter = wordGame.targetLetter
-                } else if let categoryGame = game as? CategoryGame {
-                    existingGame.storedAnswerBank = categoryGame.answerBank
-                }
-            } else {
-                level.games.append(LocalGame(from: game))
-            }
-        }
-    }
-}
-
-extension GameSyncService {
-    private func log(_ message: String) {
-        print("🔄 [GameSync] \(message)")
-    }
-    
-    private func performIncrementalSync(context: ModelContext) async throws {
-        log("Starting incremental sync")
-        let gameTypeMetadata = try await gameDataService.fetchGameTypeMetadata()
-        log("Firestore Metadata: \(gameTypeMetadata)")
-        
-        let storedChecksums = defaults.dictionary(forKey: DefaultsKeys.gameTypeChecksums) as? [String: String] ?? [:]
-        
-        log("Found \(gameTypeMetadata.count) game types in metadata")
-        
-        var newChecksums: [String: String] = [:]
-        var downloadedGameTypes = 0
-        var skippedGameTypes = 0
-        
-        for metadata in gameTypeMetadata {
-            guard let metadataId = metadata.id?.replacingOccurrences(of: "/metadata/info", with: "") else { continue }
-            print(metadata)
+        if !updatedGames.isEmpty {
+            // If there are updates, refresh all GameTypes and Levels first
+            let gameTypes = try await gameDataService.fetchGameTypes()
+            try localStorage.saveGameTypes(gameTypes, context: context)
             
-            if storedChecksums[metadataId] != metadata.checksum {
-                log("📥 Game type \(metadataId) needs update - stored checksum: \(storedChecksums[metadataId] ?? "none"), new checksum: \(metadata.checksum)")
-                if let gameType = try await gameDataService.fetchGameType(id: metadataId) {
-                    try await updateLocalGameType(gameType, context: context)
-                    newChecksums[metadataId] = metadata.checksum
-                    downloadedGameTypes += 1
-                }
-            } else {
-                log("⏭️ Skipping game type \(metadataId) - checksum unchanged")
-                newChecksums[metadataId] = storedChecksums[metadataId]
-                skippedGameTypes += 1
+            // Then update the specific games
+            for game in updatedGames {
+                try localStorage.saveGame(game, context: context)
             }
         }
-        
-        log("Sync complete - Downloaded: \(downloadedGameTypes), Skipped: \(skippedGameTypes)")
-        defaults.set(newChecksums, forKey: DefaultsKeys.gameTypeChecksums)
-        defaults.set(Date(), forKey: DefaultsKeys.lastSyncDate)
-    }
-}
-
-
-// Add UserDefaults extension for last sync management
-extension UserDefaults {
-    private enum Keys {
-        static let lastSyncTimestamp = "lastSyncTimestamp"
-        static let syncBackupTimestamp = "syncBackupTimestamp"
     }
     
-    var lastSyncDate: Date? {
-        get { date(forKey: Keys.lastSyncTimestamp) }
-        set { set(newValue, forKey: Keys.lastSyncTimestamp) }
-    }
-    
-    var backupSyncDate: Date? {
-        get { date(forKey: Keys.syncBackupTimestamp) }
-        set { set(newValue, forKey: Keys.syncBackupTimestamp) }
-    }
-    
-    func updateSyncDates() {
-        let now = Date()
-        lastSyncDate = now
-        backupSyncDate = now
+    private func fetchGameTypeForGame(_ game: Game) async throws -> GameType? {
+        let gameTypes = try await gameDataService.fetchGameTypes()
+        return gameTypes.first { $0.id == game.gameTypeId }
     }
 }
-
-extension UserDefaults {
-    func date(forKey key: String) -> Date? {
-        return object(forKey: key) as? Date
-    }
-}
+*/

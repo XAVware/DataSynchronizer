@@ -1,122 +1,6 @@
-
+/*
 import SwiftUI
 import SwiftData
-
-/**
- * Displays the list of available game types (Word Games, Category Games).
- */
-struct GameTypeListView: View {
-    let gameTypes: [GameType]
-    @Binding var navPath: [ViewPath]
-    
-    var body: some View {
-        List(gameTypes) { gameType in
-            Button {
-                navPath.append(.gameType(gameType))
-            } label: {
-                VStack(alignment: .leading) {
-                    Text(gameType.name)
-                        .font(.headline)
-                    Text(gameType.description)
-                        .font(.subheadline)
-                        .foregroundColor(.secondary)
-                }
-            }
-        }
-    }
-}
-
-/**
- * Displays available levels (Easy, Medium, Hard) for a selected game type.
- */
-struct LevelListView: View {
-    let gameType: GameType
-    @Binding var navPath: [ViewPath]
-    
-    var body: some View {
-        List(gameType.levels) { level in
-            Button {
-                navPath.append(.level(level))
-            } label: {
-                VStack(alignment: .leading) {
-                    Text(level.name)
-                        .font(.headline)
-                    Text("Difficulty: \(level.difficulty)")
-                        .font(.subheadline)
-                        .foregroundColor(.secondary)
-                }
-            }
-        }
-        .navigationTitle(gameType.name)
-    }
-}
-
-/**
- * Displays individual games available at the selected difficulty level.
- */
-struct GameListView: View {
-    let level: Level
-    @Binding var navPath: [ViewPath]
-    
-    var body: some View {
-        List(level.games) { game in
-            Button {
-                navPath.append(.game(game))
-            } label: {
-                VStack(alignment: .leading) {
-                    Text(game.name)
-                        .font(.headline)
-                    Text(game.description)
-                        .font(.subheadline)
-                        .foregroundColor(.secondary)
-                }
-            }
-        }
-        .navigationTitle(level.name)
-    }
-}
-
-
-// MARK: - Game Play View
-struct GamePlayViewTest: View {
-    // Create sample games for preview
-    static var sampleWordGame: WordGame {
-        let game = WordGame()
-        game.id = "test-word-game"
-        game.name = "Start with 'S'"
-        game.description = "Find words that start with the letter S"
-        game.instructions = "Enter words that begin with the letter S"
-        game.timeLimit = 60
-        game.caseSensitive = false
-        game.type = .word
-        game.letterPosition = .start
-        game.targetLetter = "S"
-        return game
-    }
-    
-    static var sampleCategoryGame: CategoryGame {
-        let game = CategoryGame()
-        game.id = "test-category-game"
-        game.name = "Animals"
-        game.description = "Name different animals"
-        game.instructions = "Enter names of different animals"
-        game.timeLimit = 60
-        game.caseSensitive = false
-        game.type = .category
-        game.answerBank = ["dog", "cat", "elephant", "giraffe", "lion", "tiger"]
-        return game
-    }
-    
-    var body: some View {
-        // You can switch between word and category game previews here
-        GamePlayView(game: Self.sampleWordGame)
-            .background(Color.bg100)
-    }
-}
-
-#Preview {
-    GamePlayViewTest()
-}
 
 
 /**
@@ -136,53 +20,14 @@ struct GamePlayView: View {
     @State private var timeRemaining: Int
     @State private var isGameActive = false
     @State private var currentAnswers: [String] = []
-    @State private var isLoadingAnswers = false
-    @State private var loadError: String?
     
+    /// Initializes the view with a specific game and sets up the initial timer
     init(game: Game) {
         self.game = game
         _timeRemaining = State(initialValue: game.timeLimit)
     }
     
     var body: some View {
-        Group {
-            if isLoadingAnswers {
-                ProgressView("Loading answers...")
-            } else if let error = loadError {
-                Text("Error: \(error)")
-            } else {
-                gameContent
-            }
-        }
-        .task {
-            if let _ = game as? CategoryGame {
-                isLoadingAnswers = true
-                do {
-                    try await loadAnswerBank()
-                } catch {
-                    loadError = error.localizedDescription
-                }
-                isLoadingAnswers = false
-            }
-        }
-    }
-    
-    private func loadAnswerBank() async throws {
-        if let categoryGame = game as? CategoryGame,
-           let levelId = game.level?.id,
-           let gameTypeId = game.level?.gameType?.id {
-            let answerBank = try await GameDataService.shared.fetchAnswerBank(
-                for: game.id ?? "",
-                levelId: levelId,
-                gameTypeId: gameTypeId
-            )
-            if let answerBank = answerBank {
-                categoryGame.answerBank = answerBank
-            }
-        }
-    }
-    
-    private var gameContent: some View {
         VStack(spacing: 12) {
             // Game Header section displays the title and instructions
             VStack {
@@ -200,15 +45,7 @@ struct GamePlayView: View {
                 .monospacedDigit()
             
             // Polymorphic game content based on game type
-            /**
-             * Determines which game-specific content to display based on the game type.
-             * Uses type casting to provide appropriate UI for word or category games.
-             */
-            if let wordGame = game as? WordGame {
-                WordGameContent(game: wordGame)
-            } else if let categoryGame = game as? CategoryGame {
-                CategoryGameContent(game: categoryGame)
-            }
+            gameContent
             
             // Input Area for user answers
             HStack {
@@ -251,6 +88,7 @@ struct GamePlayView: View {
             .buttonStyle(.borderedProminent)
             .padding()
             
+            
             Spacer()
             
             CustomKeyboard { key in
@@ -263,10 +101,23 @@ struct GamePlayView: View {
                 }
             }
             .frame(maxHeight: 280)
-
+            
         }
         .padding()
         .background(Color.bg500)
+    }
+    
+    /**
+     * Determines which game-specific content to display based on the game type.
+     * Uses type casting to provide appropriate UI for word or category games.
+     */
+    @ViewBuilder
+    private var gameContent: some View {
+        if let wordGame = game as? WordGame {
+            WordGameContent(game: wordGame)
+        } else if let categoryGame = game as? CategoryGame {
+            CategoryGameContent(game: categoryGame)
+        }
     }
     
     /**
@@ -324,8 +175,8 @@ struct GamePlayView: View {
      * - Checks if the word matches the target letter rule (start, end, contains)
      */
     private func validateWordGameAnswer(_ answer: String, wordGame: WordGame) -> Bool {
-        let processedAnswer = wordGame.caseSensitive ? answer : answer.lowercased()
-        let processedTarget = wordGame.caseSensitive ? wordGame.targetLetter : wordGame.targetLetter.lowercased()
+        let processedAnswer = answer.lowercased()
+        let processedTarget = wordGame.targetLetter.lowercased()
         
         return switch wordGame.letterPosition {
         case .start:    processedAnswer.hasPrefix(processedTarget)
@@ -340,10 +191,8 @@ struct GamePlayView: View {
      * - Checks if the answer exists in the category's answer bank
      */
     private func validateCategoryGameAnswer(_ answer: String, categoryGame: CategoryGame) -> Bool {
-        let processedAnswer = categoryGame.caseSensitive ? answer : answer.lowercased()
-        let processedBank = categoryGame.answerBank.map {
-            categoryGame.caseSensitive ? $0 : $0.lowercased()
-        }
+        let processedAnswer = answer.lowercased()
+        let processedBank = categoryGame.answerBank.map { $0.lowercased() }
         return processedBank.contains(processedAnswer)
     }
     
@@ -404,20 +253,290 @@ struct WordGameContent: View {
  */
 struct CategoryGameContent: View {
     let game: CategoryGame
-    @State private var answerCount: Int = 0
     
     var body: some View {
         VStack(spacing: 10) {
             Text("Category Game")
                 .font(.title2)
             
-            if game.answerBank.isEmpty {
-                ProgressView("Loading answers...")
-            } else {
-                Text("\(game.answerBank.count) possible answers")
-                    .font(.headline)
-                    .foregroundColor(.secondary)
-            }
+            Text("\(game.answerBank.count) possible answers")
+                .font(.headline)
+                .foregroundColor(.secondary)
         }
     }
 }
+
+
+import SwiftUI
+import SwiftData
+
+struct GameTypeListView: View {
+    let gameTypes: [GameType]
+    @Binding var navPath: [ViewPath]
+    
+    var body: some View {
+        List {
+            ForEach(gameTypes) { gameType in
+                GameTypeCard(gameType: gameType)
+                    .contentShape(Rectangle())
+                    .onTapGesture {
+                        navPath.append(.gameType(gameType))
+                    }
+            }
+        }
+        .listStyle(.plain)
+        .background(Color.bg100)
+    }
+}
+
+struct GameTypeCard: View {
+    let gameType: GameType
+    
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(gameType.name)
+                .font(.title3.bold())
+                .foregroundColor(.textDark)
+            
+            Text(gameType.description)
+                .font(.subheadline)
+                .foregroundColor(.textDark)
+                .lineLimit(2)
+            
+            HStack {
+                Label("\(gameType.levels.count) Levels", systemImage: "speedometer")
+                Spacer()
+                Image(systemName: "chevron.right")
+            }
+            .font(.footnote)
+            .foregroundColor(.textDark)
+        }
+        .padding()
+        .background(Color.bg200)
+        .cornerRadius(12)
+        .shadow(color: .shadow300.opacity(0.1), radius: 4, y: 2)
+    }
+}
+
+struct LevelListView: View {
+    let gameType: GameType
+    @Binding var navPath: [ViewPath]
+    
+    var body: some View {
+        ScrollView {
+            LazyVStack(spacing: 16) {
+                ForEach(gameType.levels) { level in
+                    LevelCard(level: level)
+                        .contentShape(Rectangle())
+                        .onTapGesture {
+                            navPath.append(.level(level))
+                        }
+                }
+            }
+            .padding()
+        }
+        .background(Color.bg100)
+        .navigationTitle(gameType.name)
+    }
+}
+
+struct LevelCard: View {
+    let level: Level
+    
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Text(level.name)
+                    .font(.title3.bold())
+                Spacer()
+                DifficultyBadge(level: level.name.lowercased())
+            }
+            
+            Text(level.description)
+                .font(.subheadline)
+                .foregroundColor(.textDark)
+            
+            HStack {
+                Label("\(level.games.count) Games", systemImage: "gamecontroller")
+                Spacer()
+                Label("\(level.sugTimeLimit)s", systemImage: "clock")
+            }
+            .font(.footnote)
+            .foregroundColor(.textDark)
+        }
+        .padding()
+        .background(Color.bg200)
+        .cornerRadius(12)
+        .shadow(color: .shadow300.opacity(0.1), radius: 4, y: 2)
+    }
+}
+
+struct DifficultyBadge: View {
+    let level: String
+    
+    var color: Color {
+        switch level {
+        case "easy": return .green
+        case "medium": return .orange
+        case "hard": return .red
+        default: return .blue
+        }
+    }
+    
+    var body: some View {
+        Text(level.capitalized)
+            .font(.caption.bold())
+            .padding(.horizontal, 8)
+            .padding(.vertical, 4)
+            .background(color.opacity(0.2))
+            .foregroundColor(color)
+            .clipShape(Capsule())
+    }
+}
+
+struct GameListView: View {
+    @Environment(\.modelContext) private var context
+    let level: Level
+    @Binding var navPath: [ViewPath]
+    @State private var games: [Game] = []
+    @State private var isLoading = true
+    @State private var error: Error?
+    
+    var body: some View {
+        Group {
+            if isLoading {
+                ProgressView("Loading games...")
+            } else if let error = error {
+                VStack {
+                    Text("Error loading games")
+                    Text(error.localizedDescription)
+                        .font(.caption)
+                }
+            } else if games.isEmpty {
+                Text("No games available")
+                    .font(.headline)
+                    .foregroundColor(.secondary)
+                    .padding(.top, 40)
+            } else {
+                ScrollView {
+                    LazyVStack(spacing: 16) {
+                        ForEach(games) { game in
+                            GameCard(game: game)
+                                .contentShape(Rectangle())
+                                .onTapGesture {
+                                    print("Game selected:")
+                                    print(game)
+                                    navPath.append(.game(game))
+                                }
+                        }
+                    }
+                    .padding()
+                }
+            }
+        }
+        .background(Color.bg100)
+        .navigationTitle(level.name)
+        .task {
+            await loadGames()
+        }
+    }
+    
+    private func loadGames() async {
+        do {
+            isLoading = true
+            let descriptor = FetchDescriptor<LocalLevel>(
+                predicate: #Predicate<LocalLevel> { $0.id == level.id ?? "" }
+            )
+            
+            if let localLevel = try context.fetch(descriptor).first {
+                games = localLevel.games.map { localGame in
+                    let game: Game
+                    
+                    if localGame.type == "category" {
+                        let categoryGame = CategoryGame()
+                        categoryGame.answerBank = localGame.answerBank ?? []
+                        game = categoryGame
+                    } else {
+                        let wordGame = WordGame()
+                        wordGame.letterPosition = WordGame.LetterPosition(rawValue: localGame.letterPosition ?? "start") ?? .start
+                        wordGame.targetLetter = localGame.targetLetter ?? ""
+                        game = wordGame
+                    }
+                    
+                    game.id = localGame.id
+                    game.name = localGame.name
+                    game.description = localGame.locDescription
+                    game.instructions = localGame.instructions
+                    game.timeLimit = localGame.timeLimit
+                    game.type = localGame.type == "category" ? .category : .word
+                    game.gameTypeId = localGame.gameTypeId
+                    game.levelId = localGame.levelId
+                    
+                    return game
+                }
+            }
+            isLoading = false
+        } catch {
+            self.error = error
+            isLoading = false
+        }
+    }
+}
+
+struct GameCard: View {
+    let game: Game
+    
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text(game.name)
+                .font(.title3.bold())
+            
+            Text(game.description)
+                .font(.subheadline)
+                .foregroundColor(.textDark)
+            
+            HStack {
+                Label("\(game.timeLimit)s", systemImage: "clock")
+                Spacer()
+                if let wordGame = game as? WordGame {
+                    WordGameBadge(game: wordGame)
+                } else if game is CategoryGame {
+                    CategoryGameBadge()
+                }
+            }
+            .font(.footnote)
+            .foregroundColor(.textDark)
+        }
+        .padding()
+        .background(Color.bg200)
+        .cornerRadius(12)
+        .shadow(color: .shadow300.opacity(0.1), radius: 4, y: 2)
+    }
+}
+
+struct WordGameBadge: View {
+    let game: WordGame
+    
+    var body: some View {
+        Label(game.letterPosition.rawValue.capitalized, systemImage: "textformat.abc")
+            .font(.caption.bold())
+            .padding(.horizontal, 8)
+            .padding(.vertical, 4)
+            .background(Color.blue.opacity(0.2))
+            .foregroundColor(.blue)
+            .clipShape(Capsule())
+    }
+}
+
+struct CategoryGameBadge: View {
+    var body: some View {
+        Label("Category", systemImage: "folder")
+            .font(.caption.bold())
+            .padding(.horizontal, 8)
+            .padding(.vertical, 4)
+            .background(Color.purple.opacity(0.2))
+            .foregroundColor(.purple)
+            .clipShape(Capsule())
+    }
+}
+*/
