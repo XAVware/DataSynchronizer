@@ -272,7 +272,7 @@ import Combine
 
 struct ProfileView: View {
     @StateObject var vm: ProfileViewModel = ProfileViewModel()
-    @Binding var navPath: [ViewPath]
+//    @Binding var navPath: [NavPath]
     
     @State var user: User?
     
@@ -323,7 +323,8 @@ struct ProfileView: View {
         .onReceive(vm.$reauthenticationRequired) { reqReauth in
             if reqReauth == true {
                 vm.currentState = .viewProfile
-                navPath.removeAll()
+//                navPath.removeAll()
+                NavService.shared.toRoot()
                 AuthService.shared.signout()
             }
         }
@@ -392,13 +393,13 @@ struct ProfileView: View {
     }
     
     private func backTapped() {
-        navPath.removeLast()
+        NavService.shared.popView()
     }
 }
 
 #Preview {
     NavigationStack {
-        ProfileView(navPath: .constant([]))
+        ProfileView()
     }
 }
 
@@ -655,58 +656,3 @@ struct OnboardingView: View {
 
 // MARK: - Menu View
 
-struct MenuView: View {
-    /// Menu components are equally spaced, `COMONENT_SPACING` ('x' from now on) away from eachother. The stack has 2x spacing. Stacked components (i.e. the Toggle label) have vertical padding of x.  The label in each component has x vertical padding.
-    let COMPONENT_SPACING: CGFloat = 6
-    @StateObject private var vm: MenuViewModel
-    @StateObject var ENV: SessionManager = SessionManager.shared
-    
-    init(navPath: Binding<[ViewPath]>) {
-        self._vm = StateObject(wrappedValue: MenuViewModel(navPath: navPath))
-    }
-    
-    var body: some View {
-        VStack(alignment: .leading) {
-            // 1. Account -- Only included if logged in, otherwise login/sign up button.
-            VStack(spacing: COMPONENT_SPACING) {
-                Button {
-                    vm.pushView(.profileView)
-                } label: {
-                    Image(systemName: "person.fill")
-                    Text("Profile")
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(.vertical, COMPONENT_SPACING)
-                    Spacer()
-                    Image(systemName: "chevron.right")
-                }
-                .buttonStyle(.plain)
-                .padding(.vertical, COMPONENT_SPACING)
-            } //: VStack
-            .padding(.horizontal)
-            .padding(.vertical, 12)
-            .modifier(SubViewStyleMod())
-            
-            Spacer()
-            
-            // 4. Sign Out
-            Button("Sign Out", systemImage: "arrow.left.to.line.compact", action: vm.logOut)
-                .foregroundStyle(Color.textDark)
-                .padding()
-        } //: VStack
-        .padding()
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .foregroundStyle(Color.textDark)
-        .background(Color.bg100)
-        .navigationTitle("Menu")
-        .navigationBarTitleDisplayMode(.large)
-        .navigationBarBackButtonHidden(true)
-        .toolbar {
-            ToolbarItem(placement: .topBarLeading) {
-                Button("Back", systemImage: "chevron.left") {
-                    vm.navPath.removeLast()
-                }
-            } //: Toolbar Item
-        } //: Toolbar
-    } //: Body
-    
-}

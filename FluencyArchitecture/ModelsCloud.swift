@@ -9,6 +9,7 @@
 // MARK: - Firebase Models
 
 import FirebaseFirestore
+import CryptoKit
 
 class GameMode: Identifiable, Codable {
     @DocumentID var id: String?
@@ -28,6 +29,16 @@ class GameMode: Identifiable, Codable {
         
         let levelsDict = try container.decodeIfPresent([String: Level].self, forKey: .levels) ?? [:]
         levels = levelsDict.map { $0.value }
+    }
+    
+    func getChecksum() -> String {
+        var str: String = ""
+        let dataStr = "\(id ?? "")\(name)\(description)\(levels)"
+        if let data = dataStr.data(using: .utf8) {
+            let digest = SHA256.hash(data: data)
+            str = digest.compactMap { String(format: "%02x", $0) }.joined()
+        }
+        return str
     }
 }
 

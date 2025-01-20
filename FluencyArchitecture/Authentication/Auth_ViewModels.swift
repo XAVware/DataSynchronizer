@@ -91,19 +91,9 @@ final class ProfileViewModel: ProfileViewModeling {
     @Published var hapticsOn: Bool = true
     @Published var accLabelsOn: Bool = true
     
-    @Binding var navPath: [ViewPath]
-    
-    init(navPath: Binding<[ViewPath]>) {
-        self._navPath = navPath
-    }
-    
-    func pushView(_ viewPath: ViewPath) {
-        navPath.append(viewPath)
-    }
-    
     func logOut() {
         AuthService.shared.signout()
-        navPath.removeAll()
+        NavService.shared.toRoot()
         
         // TODO: Toggle Onboarding?
     }

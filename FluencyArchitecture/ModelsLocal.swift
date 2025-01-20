@@ -7,6 +7,7 @@
 
 import Foundation
 import SwiftData
+import CryptoKit
 
 @Model
 final class LocalGameMode: Identifiable {
@@ -29,6 +30,16 @@ final class LocalGameMode: Identifiable {
         self.name = gameMode.name
         self.locDescription = gameMode.description
         self.levels = []
+    }
+    
+    func getChecksum() -> String {
+        var str: String = ""
+        let dataStr = "\(id)\(name)\(locDescription)\(levels)"
+        if let data = dataStr.data(using: .utf8) {
+            let digest = SHA256.hash(data: data)
+            str = digest.compactMap { String(format: "%02x", $0) }.joined()
+        }
+        return str
     }
 }
 @Model
@@ -69,7 +80,17 @@ final class LocalLevel {
         self.gameRefs = level.gameRefs.map { $0.documentID }
     }
 }
-
+extension LocalLevel {
+    convenience init(from level: Level, gameMode: LocalGameMode) {
+        self.init()
+        self.id = level.id ?? UUID().uuidString
+        self.name = level.name
+        self.locDescription = level.description
+        self.sugTimeLimit = level.sugTimeLimit
+        self.gameRefs = level.gameRefs.map { $0.documentID }
+        self.gameMode = gameMode
+    }
+}
 
 @Model
 final class LocalGame: Identifiable {
@@ -101,7 +122,7 @@ final class LocalGame: Identifiable {
     
     /// Creates a new empty game with default values
     init() {
-        self.id = UUID().uuidString
+        self.id = ""
         self.name = ""
         self.locDescription = ""
         self.instructions = ""
@@ -118,7 +139,7 @@ final class LocalGame: Identifiable {
     /// - Parameter game: Source game from Firestore
     convenience init(from game: Game) {
         self.init()
-        self.id = game.id ?? UUID().uuidString
+        self.id = game.id!
         self.name = game.name
         self.locDescription = game.description
         self.instructions = game.instructions
@@ -138,4 +159,6 @@ final class LocalGame: Identifiable {
             self.answerBank = categoryGame.answerBank
         }
     }
+    
+    
 }

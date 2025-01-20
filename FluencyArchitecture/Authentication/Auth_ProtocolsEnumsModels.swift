@@ -265,11 +265,11 @@ protocol RootViewModeling: ObservableObject {
     var currentUser: User? { get }
     
     /// Current navigation path
-    var navPath: [ViewPath] { get set }
+//    var navPath: [NavPath] { get set }
     
     /// Pushes a new view onto the navigation stack
     /// - Parameter viewPath: View to push
-    func pushView(_ viewPath: ViewPath)
+//    func pushView(_ viewPath: NavPath)
 }
 
 // MARK: - ENUMS
@@ -339,14 +339,6 @@ enum AppAuthError: Error {
         case .nullUserAfterSignIn:                  "Auth user returned null after successful sign in."
         }
     }
-}
-
-enum ViewPath: Identifiable, Hashable {
-    var id: ViewPath { return self }
-    case landing, login, signUp, homepage, menuView, profileView
-    case gameMode(LocalGameMode)
-    case level(LocalLevel)
-    case game(LocalGame)
 }
 
 // MARK: - User Model

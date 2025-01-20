@@ -4,6 +4,7 @@
 //
 //  Created by Ryan Smetana on 1/18/25.
 //
+
 import SwiftUI
 
 class GameState: ObservableObject {
@@ -66,14 +67,13 @@ class GameState: ObservableObject {
         }
         
         if game.type == "word" {
-            guard let targetLetter = game.targetLetter?.lowercased(),
-                  let position = game.letterPosition else { return false }
+            guard let targetLetter = game.targetLetter?.lowercased(), let position = game.letterPosition else { return false }
             
-            switch position {
-            case "start": return processedAnswer.hasPrefix(targetLetter)
-            case "end": return processedAnswer.hasSuffix(targetLetter)
-            case "contains": return processedAnswer.contains(targetLetter)
-            default: return false
+            return switch position {
+            case "start":       processedAnswer.hasPrefix(targetLetter)
+            case "end":         processedAnswer.hasSuffix(targetLetter)
+            case "contains":    processedAnswer.contains(targetLetter)
+            default:            false
             }
         } else {
             guard let answerBank = game.answerBank else { return false }

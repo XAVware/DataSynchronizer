@@ -29,7 +29,7 @@ struct PrimaryButtonStyle: ButtonStyle {
     }
 }
 
-#Preview {
-    LoginView(email: .constant(""))
-        .environmentObject(AuthViewClusterModel())
-}
+//#Preview {
+//    LoginView(email: .constant(""))
+//        .environmentObject(AuthViewClusterModel())
+//}

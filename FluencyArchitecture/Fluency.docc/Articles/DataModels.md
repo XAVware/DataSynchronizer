@@ -72,8 +72,8 @@ note for Game "Base class for all games\nType determines specific implementation
 
 ## Firestore Schema
 
-gameTypes/
-├─ {gameTypeId}/           # Document containing basic game type info
+gameModes/
+├─ {gameModeId}/           # Document containing basic game type info
 │  ├─ name: string
 │  └─ description: string
 │
@@ -81,20 +81,21 @@ gameTypes/
 │      ├─ {levelId}/       # Document containing level information
 │      │  ├─ name: string
 │      │  ├─ description: string
-│      │  └─ difficulty: number
+│      │  ├─ difficulty: number
+│      │  └─ gameRefs: [GameId]
 │      │
-│      └─ games/           # Subcollection of games
-│          └─ {gameId}/    # Document containing game information
-│             ├─ name: string
-│             ├─ description: string
-│             ├─ instructions: string
-│             ├─ timeLimit: number
-│             ├─ caseSensitive: boolean
-│             ├─ type: "word" | "category"
-│             │
-│             # Word Game specific fields (when type is "word")
-│             ├─ letterPosition: "start" | "end" | "contains"
-│             ├─ targetLetter: string
-│             │
-│             # Category Game specific fields (when type is "category")
-│             └─ answerBank: string[]
+games/           # Collection of games
+│  └─ {gameId}/    # Document containing game information
+│     ├─ name: string
+│     ├─ description: string
+│     ├─ instructions: string
+│     ├─ timeLimit: number
+│     ├─ caseSensitive: boolean
+│     ├─ type: "word" | "category"
+│     │
+│     # Word Game specific fields (when type is "word")
+│     ├─ letterPosition: "start" | "end" | "contains"
+│     ├─ targetLetter: string
+│     │
+│     # Category Game specific fields (when type is "category")
+│     └─ answerBank: string[]
