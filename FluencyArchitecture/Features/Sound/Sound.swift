@@ -22,7 +22,7 @@ final class SoundService {
     
     // MARK: - Sound Effect Types
     enum SoundEffect: String {
-        case wordSubmit = "word_submit"     // When a word is successfully submitted
+        case wordSubmit = "mixkit-air-zoom-vacuum-2608"     // When a word is successfully submitted
         case wordInvalid = "word_invalid"   // When an invalid word is submitted
         case gameStart = "game_start"       // When a game begins
         case gameEnd = "game_end"           // When a game ends
@@ -44,7 +44,7 @@ final class SoundService {
             player.play()
         } else {
             // Create and cache new player
-            if let url = Bundle.main.url(forResource: effect.rawValue, withExtension: "mp3") {
+            if let url = Bundle.main.url(forResource: effect.rawValue, withExtension: "wav") {
                 do {
                     let player = try AVAudioPlayer(contentsOf: url)
                     audioPlayers[effect] = player

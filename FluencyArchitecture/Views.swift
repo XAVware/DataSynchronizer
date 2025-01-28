@@ -9,13 +9,14 @@ import SwiftUI
 import SwiftData
 
 struct LevelListView: View {
+    @Environment(NavigationService.self) var navigationService
     let gameMode: LocalGameMode
     
     var body: some View {
         List {
             ForEach(gameMode.levels) { level in
                 Button {
-                    NavService.shared.push(newDisplay: NavPath.level(level))
+                    navigationService.push(NavPath.level(level))
                 } label: {
                     VStack(alignment: .leading) {
                         Text(level.name)
@@ -39,6 +40,7 @@ struct GameListView: View {
     let level: LocalLevel
     
     @Query var games: [LocalGame]
+    @Environment(NavigationService.self) var navigationService
     
     init(level: LocalLevel) {
         self.level = level
@@ -48,7 +50,7 @@ struct GameListView: View {
         List {
             ForEach(games.filter({ $0.levelId == level.id })) { game in
                 Button {
-                    NavService.shared.push(newDisplay: NavPath.game(game))
+                    navigationService.push(NavPath.game(game))
                 } label: {
                     VStack(alignment: .leading) {
                         Text(game.name)

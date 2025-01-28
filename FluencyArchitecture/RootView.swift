@@ -9,118 +9,22 @@ import SwiftUI
 import SwiftData
 import Combine
 
-@MainActor
-protocol NavigationManager: ObservableObject {
-    func configureNavigation()
-//    var navPath: [NavPath] { get set } // Try removing set
-}
-
-enum NavCommand: Identifiable, Hashable {
-    var id: NavCommand { return self }
-    case toRoot, popView
-}
-
-enum NavPath: Identifiable, Hashable {
-    var id: NavPath { return self }
-    case landing, login, signUp, homepage, menuView, profileView
-    case gameMode(LocalGameMode)
-    case level(LocalLevel)
-    case game(LocalGame)
-}
-
-class NavService {
-    let pathView = PassthroughSubject<NavPath, Never>()
-    let commands = PassthroughSubject<NavCommand, Never>()
-    static let shared = NavService()
-    
-    func push(newDisplay: NavPath) {
-        pathView.send(newDisplay)
-    }
-    
-    func popView() {
-        commands.send(.popView)
-    }
-    
-    func toRoot() {
-        commands.send(.toRoot)
-    }
-}
-
-extension RootViewModel: NavigationManager {
-    func configureNavigation() {
-        navService.commands
-            .sink { [weak self] c in
-                self?.handleCommand(c)
-            }.store(in: &cancellables)
-        
-        navService.pathView
-            .sink { [weak self] p in
-                self?.pushView(p)
-            }.store(in: &cancellables)
-    }
-    
-    private func pushView(_ p: NavPath) {
-        navPath.append(p)
-    }
-    
-    private func handleCommand(_ command: NavCommand) {
-        switch command {
-        case .toRoot:
-            navPath = .init()
-        case .popView:
-            popView()
-        }
-    }
-    
-    private func popView() {
-        _ = navPath.removeLast()
-    }
-}
-
-// MARK: - Root View Model
-@MainActor
-final class RootViewModel: RootViewModeling {
-    private var cancellables = Set<AnyCancellable>()
-    private let authService: AuthenticationService
-    @Published private(set) var currentUser: User?
-    
-    // Navigation Manager Properties
-    private let navService = NavService.shared
-    @Published var navPath: NavigationPath = .init()
-    
-    init() {
-        self.authService = AuthService.shared
-        self.currentUser = authService.user
-        setupSubscribers()
-        configureNavigation()
-    }
-    
-    private func setupSubscribers() {
-        guard let publisher = authService as? AuthService else { return }
-        publisher.$user
-            .receive(on: RunLoop.main)
-            .assign(to: \.currentUser, on: self)
-            .store(in: &cancellables)
-    }
-}
-
 
 // MARK: - Root View
 struct RootView: View {
     @Environment(\.modelContext) private var modelContext
     @StateObject private var syncManager = SyncManager()
-    @StateObject var vm = RootViewModel()
-    @State var showLogin: Bool = AuthService.shared.user == nil
-    @StateObject var session = SessionManager.shared
     @Query var gameModes: [LocalGameMode]
     @Query var localGames: [LocalGame]
     
+    @State var navigationService: NavigationService = NavigationService()
+    
     var body: some View {
-        NavigationStack(path: $vm.navPath) {
+        NavigationStack(path: $navigationService.path) {
             List {
                 ForEach(gameModes) { gameMode in
                     Button {
-                        NavService.shared.push(newDisplay: NavPath.gameMode(gameMode))
+                        navigationService.push(NavPath.gameMode(gameMode))
                     } label: {
                         VStack(alignment: .leading) {
                             Text(gameMode.name)
@@ -141,62 +45,55 @@ struct RootView: View {
             }
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button("Menu", systemImage: "line.horizontal.3", action: menuTapped)
+                    Button("Menu", systemImage: "line.horizontal.3", action: { navigationService.push(.menu) })
                         .buttonStyle(.borderless)
                         .labelStyle(.iconOnly)
                 }
             }
             .task {
 //                clearLocalData()
-//                
-                do {
-                    let lastSyncDate = UserDefaults.standard.object(forKey: "mostRecentSync") as? Date
-//                    let lastSyncDate = Date.earliestDate
-                    
-                    let data = try await syncManager.fetchData(since: lastSyncDate)
-                    let dbGameModes = data.0
-                    let gameResults = data.1
-                    
-                    // Save gameModes (including child Level data) locally
-                    try saveGameModes(dbGameModes)
-                    
-                    // Save games locally
-                    print("\(gameResults.count) updated since last sync:")
-                    for game in gameResults {
-                        print("Game requires update: \(game.name)")
-                        if doesLocalGameExist(id: game.id ?? "") {
-                            try updateGame(game: game)
-                        } else {
-                            try addGame(game: game)
-                        }
-                    }
-                    
-                } catch {
-                    print("Error syncing: \(error)")
-                }
+                
+               await refresh()
             }
         }
         .background(Color.bg100)
         .defaultAppStorage(.standard)
-        .sheet(isPresented: $session.isOnboarding) {
-            OnboardingView()
-        }
-        .onReceive(vm.$currentUser) { user in
-            withAnimation {
-                showLogin = user == nil
+        .environment(navigationService)
+    }
+    
+    func refresh() async {
+        do {
+            // Get last sync from UserDefaults
+            let lastSyncDate = UserDefaults.standard.object(forKey: "mostRecentSync") as? Date
+            
+            // Passing Date.initialSync will fetch all games
+            let data = try await syncManager.fetchData(since: lastSyncDate ?? Date.initialSync)
+            let dbGameModes = data.0
+            let gameResults = data.1
+            
+            // Once finished, update mostRecentSync in UserDefaults
+            UserDefaults.standard.set(Date(), forKey: "mostRecentSync")
+            
+            // Save gameModes (including child Level data) locally
+            try saveGameModes(dbGameModes)
+            
+            // Save games locally
+            print("\(gameResults.count) updated since last sync:")
+            for game in gameResults {
+                print("Game requires update: \(game.name)")
+                if doesLocalGameExist(id: game.id ?? "") {
+                    try updateGame(game: game)
+                } else {
+                    try addGame(game: game)
+                }
             }
-        }
-        .fullScreenCover(isPresented: .init(
-            get: { vm.currentUser == nil },
-            set: { _ in }
-        )) {
-            AuthFunnelView()
-                .overlay(session.isLoading ? LoadingView() : nil)
-                .overlay(session.alert != nil ? AlertView(alert: session.alert!) : nil, alignment: .top)
+            
+        } catch {
+            print("Error syncing: \(error)")
         }
     }
     
-    
+    // Check local database if game exists
     func doesLocalGameExist(id: String) -> Bool {
         let fetchRequest = FetchDescriptor<LocalGame>(
             predicate: #Predicate { $0.id == id }
@@ -211,6 +108,7 @@ struct RootView: View {
         }
     }
     
+    // Save game modes to local database
     private func saveGameModes(_ gameModes: [GameMode]) throws {
         let existingGameModes = try modelContext.fetch(FetchDescriptor<LocalGameMode>())
         for gameMode in existingGameModes {
@@ -230,12 +128,14 @@ struct RootView: View {
         try modelContext.save()
     }
     
+    // Add new game to local
     private func addGame(game: Game) throws {
         let localGame = LocalGame(from: game)
         modelContext.insert(localGame)
         try modelContext.save()
     }
     
+    // Update existing local game
     private func updateGame(game: Game) throws {
         guard let id = game.id else {
             print("No ID found")
@@ -266,10 +166,6 @@ struct RootView: View {
     }
     
     
-    private func menuTapped() {
-        NavService.shared.push(newDisplay: NavPath.menuView)
-    }
-    
     private func clearLocalData() {
         do {
             let existingGameModes = try modelContext.fetch(FetchDescriptor<LocalGameMode>())
@@ -290,20 +186,18 @@ struct RootView: View {
 }
 
 
+
+
 extension RootView {
     @ViewBuilder
     func gameDestination(for path: NavPath) -> some View {
         switch path {
-        case .menuView:
-            MenuView()
-        case .profileView:
-            ProfileView()
-        case .gameMode(let gameMode):
-            LevelListView(gameMode: gameMode)
-        case .level(let level):
-            GameListView(level: level)
-        case .game(let game):
-            GamePlayView(game: game)
+        case .gameMode(let gameMode):   LevelListView(gameMode: gameMode)
+        case .level(let level):         GameListView(level: level)
+        case .game(let game):           GamePlayView(game: game)
+        case .soundTest:
+            SoundView()
+        case .menu: MenuView()
         default:
             Text("Error")
         }
