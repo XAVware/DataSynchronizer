@@ -34,6 +34,7 @@ enum DataSyncError: Error {
 // MARK: - Remote Data Service Protocols
 
 /// Defines the interface for fetching data from remote sources
+@MainActor
 protocol RemoteDataServiceProtocol: ObservableObject {
     /// Fetches updated data since a specific date
     /// - Parameter lastSyncDate: Date of last successful sync

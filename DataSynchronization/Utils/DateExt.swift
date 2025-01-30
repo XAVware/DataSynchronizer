@@ -8,7 +8,7 @@
 import Foundation
 
 extension Date {
-    static var initialSync: Date = {
+    static let initialSync: Date = {
         // Define a default date if `lastSync` is nil
         let defaultDateString = "01/01/2025"
         let formatter = DateFormatter()

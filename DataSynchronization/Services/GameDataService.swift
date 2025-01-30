@@ -8,6 +8,7 @@
 import SwiftUI
 import FirebaseFirestore
 
+@MainActor
 class GameDataService: RemoteDataServiceProtocol {
     private let db = Firestore.firestore()
     static let shared = GameDataService()

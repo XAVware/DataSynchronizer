@@ -1,78 +1,29 @@
-# Background
-- gameStructure refers to the GameMode and Level data found in gameStructure.csv
-- games refers to the Game data found in games.csv
-- Game IDs are created by Firestore then added to the spreadsheet.
-- Game createdAt property should not change after initial creation.
+# Data Synchronization
 
-onAdd:
-A new document should be created in Firestore with the game data.
-The new game's ID should be added to the spreadsheet.
-The game's document reference should be added to the corresponding Level's gameRefs array
-Set both createdAt and updatedAt timestamps to the current time
+My goal here was to sync data stored in Firestore, the source of truth, with a local SwiftData database.
 
-onModify:
-The game's updatedAt property should be updated.
+I wanted to give my client the ability to update their data remotely, as needed, while ensuring users experience minimal performance impacts. In addition, I wanted to avoid unnecessary Firestore charges by only fetching the updated data.
 
-# Test Cases and Expectations
-1. Initial run: Firestore is empty, games.csv does not contain any IDs
-Expected: 
-    gameStructure and all games are published. Game createdAt and updatedAt are equivalent.
---PASSED--
+I use `games` for this example. A `GameMode` contains `[Levels]`, each Level contain `[Games]`. Though `GameMode` and `Level` data can change `Game` data changes frequently.
 
+## Python Script
 
-2. Running with unchanged data
-Expected: 
-    When you run publishGames.py with the same games.csv content, the script checks if each game already exists by looking for its ID. 
-    For existing games with no changes, it should:
-    Not update the Firestore documents at all
-    Leave the updatedAt timestamp unchanged
---PASSED--
+Python script allows my client to publish data to Firestore via a CSV file. It gives them the flexibility to upload a file with full or partial data.
 
+When a new game is added to the spreadsheet, it does not have an ID. Firestore creates the DocumentID and the script adds it to the spreadsheet so it can be updated later. In Firestore, the `createdAt` an `updatedAt` properties are created with a server timestamp. 
 
-3. Running with full CSV data, but only one game has been modified
-Expected: 
-    Only the modified game should have it's updatedAt property updated to reflect the current time. All other games should remain unchanged.
---PASSED--
+Each time the game is included in an upload following its initial creation the script compares the game's Firestore data to what is in the spreadsheet. It updates the updatedAt property only if data has changed. Uploading the same exact file multiple times will not change any `updatedAt` properties.
 
+## iOS
 
-4. Running with full CSV data, but one game has been added
-Expected: 
-    Only the new game should be created. All other games should remain unchanged.
---PASSED--
+`GameDataService` manages Firestore
+`LocalDataService` manages SwiftData
+`DataSynchronizer`, coordinates `GameDataService` and `LocalDataService`
 
+When the app launches `DataSynchronizer` checks `UserDefaults` for `mostRecentSync` date. If it doesn't exist, this is because it's the user's first time launching the app - all data needs to be downloaded. 
 
-5. Running with only a single row containing a new game, while Firestore is fully populated
-Expected: 
-    Only the new game should be created. All other games should remain unchanged.
---PASSED--
+`mostRecentSync` is updated each time the process has finished whether or not it downloaded any data.
 
-6. Running with only a single row containing a modified game, while Firestore is fully populated
-Expected: 
-    Only the modified game should have it's updatedAt property updated. 
-    All other games should remain unchanged.
---PASSED--
+After the initial download, each time the app launches `mostRecentSync` is used to fetch games from Firestore that have been updated after it. Games that are returned are passed to `LocalDataService`, converted to swift models and saved locally.
 
-7. Multiple Changes - Running with a combination of:
-    Unchanged existing games
-    Modified existing games
-    New games 
-Expected:
-    No timestamp changes for unchanged games
-    New updatedAt timestamps only for modified games
-    Both createdAt and updatedAt timestamps for new games
---PASSED--
-
-    
-8. Empty CSV:
-Expected:
-    Log a warning about no games to process
-    Not modify any Firestore documents
---PASSED--
-
-    
-Updating the data in gameStructure.csv for either the GameMode or Level should not lose any information related to its children.
---PASSED--
-
-Updating a field in Level won't erase the gameRefs array
---PASSED--
-
+The app therefore relies on local data for anything that the users interacting with.
